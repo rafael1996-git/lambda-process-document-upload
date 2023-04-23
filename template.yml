@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Template For Lambda Resource
+Parameters:
+  Environment:
+    Type: String
+  Name:
+    Type: String
+  Version:
+    Type: String
+Mappings:
+  Configuration:
+    dev:
+      ReservedConcurrentExecutions: 1
+      LambdaSecurityGroupIds:
+        - sg-013651589ee7243c8
+      LambdaSubnetIds:
+        - subnet-0765eb83f4c7508d8
+        - subnet-050e26f865242f7b8
+        - subnet-0a916048f59c90ffe
+        - subnet-0feda4cae2811a605
+        - subnet-04220ebfaac80f303
+        - subnet-05fdf83657f0fb815
+      CodeDeployRole: service-role/DevOpsCodeDeploy
+      CodeDeployType: CodeDeployDefault.LambdaAllAtOnce
+      MemorySize: 1024
+      Timeout: 90
+    qa:
+      ReservedConcurrentExecutions: 1
+      LambdaSecurityGroupIds:
+        - sg-0683ca40a42b60692
+      LambdaSubnetIds:
+        - subnet-0ab6a465000aa371b
+        - subnet-0fc35bb6ab1f102c9
+        - subnet-04b5d1e0b7827cbf3
+      CodeDeployRole: service-role/DevOpsCodeDeploy
+      CodeDeployType: CodeDeployDefault.LambdaAllAtOnce
+      MemorySize: 1024
+      Timeout: 90
+    prod:
+      ReservedConcurrentExecutions: 5
+      LambdaSecurityGroupIds:
+        - sg-0b6c575c855882166
+      LambdaSubnetIds:
+        - subnet-0b867021563e502ee
+        - subnet-0da9b550445368a2e
+        - subnet-0231e51bddc0162a0
+      CodeDeployRole: service-role/DevOpsCodeDeploy
+      CodeDeployType: CodeDeployDefault.LambdaAllAtOnce
+      MemorySize: 1024
+      Timeout: 90
+  Layers:
+    dev:
+      HuellaCoreSpring: "huella-azteca-core-spring:1"
+      HuellaCoreDbOracle: "huella-azteca-core-db-oracle:1"
+      HuellaCoreS3: "huella-azteca-core-s3:1"
+    qa:
+      HuellaCoreSpring: "huella-azteca-core-spring:1"
+      HuellaCoreDbOracle: "huella-azteca-core-db-oracle:1"
+      HuellaCoreS3: "huella-azteca-core-s3:1"
+    prod:
+      HuellaCoreSpring: "huella-azteca-core-spring:1"
+      HuellaCoreDbOracle: "huella-azteca-core-db-oracle:1"
+      HuellaCoreS3: "huella-azteca-core-s3:1"
+  Variables:
+    dev:
+      EncryptionKey: com/upax/huella-azteca/security/encryption
+      OraCredKey: com/upax/huella-azteca/db/oracle/usrhuellitas
+      BucketFiles: dev.huella.azteca.photos
+    qa:
+      EncryptionKey: com/upax/huella-azteca/security/encryption
+      OraCredKey: com/upax/huella-azteca/db/oracle/usrhuellitas
+      BucketFiles: qa.huella.azteca.photos
+    prod:
+      EncryptionKey: com/upax/huella-azteca/security/encryption
+      OraCredKey: com/upax/huella-azteca/db/oracle/usrhuellitas
+      BucketFiles: prod.huella.azteca.photos
+Resources:
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - 'sts:AssumeRole'
+      Description: !Sub
+        - "Role for lambda ${Name}"
+        - { Name: !Ref Name }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Path: /devops/
+      Policies:
+        - PolicyName: !Ref Name
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                Resource: !Sub
+                  - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:${Name}'
+                  - { Name: !Ref Name }
+      RoleName: !Ref Name
+      Tags:
+        - Key: "Type"
+          Value: "devops"
+  LambdaAlarm:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn: LambdaFunction
+    Properties:
+      AlarmName: !Ref Name
+      AlarmDescription: Alarma de pruebas
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Maximum
+      Period: '60'
+      EvaluationPeriods: '1'
+      Threshold: '1'
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: Name
+          Value:
+            Ref: LambdaFunction
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Ref Name
+      CodeUri: dist
+      Handler: com.huellazteca.api.HuellAztLambdaHandler::handleRequest
+      Runtime: java11
+      MemorySize: !FindInMap [ Configuration, !Ref Environment, MemorySize ]
+      Timeout: !FindInMap [ Configuration, !Ref Environment, Timeout ]
+      Description: !Sub
+        - "Release Version ${Version}"
+        - { Version: !Ref Version }
+      ReservedConcurrentExecutions: !FindInMap [ Configuration, !Ref Environment, ReservedConcurrentExecutions ]
+      Policies:
+        - Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Action:
+                - 'lambda:InvokeFunction'
+              Resource: !Sub
+                - 'arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:${Name}'
+                - { Name: !Ref Name }
+      Layers:
+        - !Sub
+          - "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${Layer}"
+          - { Layer: !FindInMap [ Layers, !Ref Environment, HuellaCoreSpring ] }
+        - !Sub
+          - "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${Layer}"
+          - { Layer: !FindInMap [ Layers, !Ref Environment, HuellaCoreDbOracle ] }
+        - !Sub
+          - "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:${Layer}"
+          - { Layer: !FindInMap [ Layers, !Ref Environment, HuellaCoreS3 ] }
+      Environment:
+        Variables:
+          AppName: !Ref Name
+          Environment: !Ref Environment
+          Version: !Ref Version
+          EncryptionKey: !FindInMap [ Variables, !Ref Environment, EncryptionKey ]
+          OraCredKey: !FindInMap [ Variables, !Ref Environment, OraCredKey ]
+          BucketFiles: !FindInMap [ Variables, !Ref Environment, BucketFiles ]
+      AutoPublishAlias: live
+      Role: !Sub
+        - "arn:aws:iam::${AWS::AccountId}:role/devops/${LambdaRole}"
+        - { LambdaRole: !Ref LambdaRole }
+      DeploymentPreference:
+        Role: !Sub
+          - "arn:aws:iam::${AWS::AccountId}:role/${CodeDeployRole}"
+          - { CodeDeployRole: !FindInMap [ Configuration, !Ref Environment, CodeDeployRole ] }
+        Type: !FindInMap [ Configuration, !Ref Environment, CodeDeployType ]
+      VpcConfig:
+        SecurityGroupIds: !FindInMap [ Configuration, !Ref Environment, LambdaSecurityGroupIds ]
+        SubnetIds: !FindInMap [ Configuration, !Ref Environment, LambdaSubnetIds ]
